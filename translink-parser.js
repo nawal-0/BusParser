@@ -1,6 +1,5 @@
-//const prompt = require("prompt-sync")({sigint: true});
 import promptSync from 'prompt-sync';
-const prompt = promptSync();
+const prompt = promptSync({sigint: true});
 import { createReadStream, readFile, writeFile } from "fs";
 import { parse } from "csv-parse";
 import fetch from "node-fetch";
@@ -10,7 +9,7 @@ import fetch from "node-fetch";
 // list of buses that depart from UQ Lakes
 const buses = ['66', '192', '169', '209', '29', 'P332', '139', '28'];
 // list of UQ Lakes stop IDs 
-const lakesStopId = ['1853', '1878', '1882', '1947']
+const lakesStopId = ['1853', '1878', '1882', '1947'];
 // urls
 const vehiclePositionsURL = "http://127.0.0.1:5343/gtfs/seq/vehicle_positions.json";
 const tripUpdatesURL= "http://127.0.0.1:5343/gtfs/seq/trip_updates.json";
@@ -331,7 +330,11 @@ async function readCache(filename) {
     const dataArray = [];
     return new Promise((resolve, reject) => {
         readFile(`./cached-data/${filename}.json`, 'utf-8', function (err, data) {
-            if (err) {reject(err);}
+            if (err) {
+                // if file does not exist
+                if (err.code == 'ENOENT') {
+                    resolve(dataArray);
+                }}
             if (data) {dataArray.push(data);}
             resolve(dataArray);
         });
@@ -356,7 +359,7 @@ async function busTracker() {
     let trip;
     let calendar;
     let stopTime;
-    let currentDate = new Date();
+    const currentDate = new Date();
     let tripUpdateArray;
     let vehiclePositionArray;
 
@@ -364,12 +367,13 @@ async function busTracker() {
     const dateString = askDate();
     const time = askTime();
     const routeName = askRouteName();
-
+    
+    const s = new Date().getTime()
     // set date & time
     const date = new Date(dateString);
     date.setHours(time.split(":")[0]);
     date.setMinutes(time.split(":")[1]);
-    
+
     // parse all static data files
     const rt = await parseRouteFile(routeName)
     if (!trip) {trip = await parseFile(tripsFile)};
@@ -382,9 +386,13 @@ async function busTracker() {
     const joinedTime = joinTime(filteredTrips, stopTime, time, add10Mins(date));
 
     // live data 
-    const curr = new Date();                
-                                                            // time greater than 5 mins
-    if (!tripUpdateArray || !vehiclePositionArray || (curr.getTime() - currentDate.getTime())/60000 >= 5) {
+    const curr = new Date();   
+    
+    tripUpdateArray = readCache('trip_updates');
+    vehiclePositionArray = await readCache('vehicle_positions');
+    
+    //vehiclePositionArray["header"]["timestamp"]                                       // time greater than 5 mins
+    if (!tripUpdateArray.length || !vehiclePositionArray.length) {
         const tripUpdatesData = await fetchData(tripUpdatesURL);
         const vehiclePositionsData = await fetchData(vehiclePositionsURL);
 
@@ -393,15 +401,34 @@ async function busTracker() {
         await saveCache('vehicle_positions', vehiclePositionsData);
         tripUpdateArray = await readCache('trip_updates');
         vehiclePositionArray = await readCache('vehicle_positions');
-
         tripUpdateArray = JSON.parse(tripUpdateArray);
-        vehiclePositionArray = JSON.parse(vehiclePositionArray)["entity"];
+        vehiclePositionArray = JSON.parse(vehiclePositionArray);
+
+    } else {
+
+    tripUpdateArray = JSON.parse(tripUpdateArray);
+    vehiclePositionArray = JSON.parse(vehiclePositionArray);
+    
+    if ((vehiclePositionArray["header"]["timestamp"]  - currentDate.getTime())/60000 >= 5) {
+        const tripUpdatesData = await fetchData(tripUpdatesURL);
+        const vehiclePositionsData = await fetchData(vehiclePositionsURL);
+
+        const filteredTripUpdates = tripUpdatesData["entity"].filter((entity) => entity.tripUpdate.stopTimeUpdate.some(e => lakesStopId.includes(e.stopId)));
+        await saveCache('trip_updates', filteredTripUpdates);
+        await saveCache('vehicle_positions', vehiclePositionsData);
+        tripUpdateArray = await readCache('trip_updates');
+        vehiclePositionArray = await readCache('vehicle_positions');
+        tripUpdateArray = JSON.parse(tripUpdateArray);
+        vehiclePositionArray = JSON.parse(vehiclePositionArray);
     }
+    }
+
     // join live data
     const joinedLiveTime = joinLiveTime(joinedTime, tripUpdateArray);
-    const finalTrips = joinLivePosition(joinedLiveTime, vehiclePositionArray);
+    const finalTrips = joinLivePosition(joinedLiveTime, vehiclePositionArray["entity"]);
     
     console.table(finalTrips.sort(sortByTime));
+    console.log(new Date().getTime() - s);
     if (askToSearchAgain()) {
         continue;
     } else {
