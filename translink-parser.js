@@ -375,15 +375,14 @@ async function getVehicleData() {
 /**
  * Main app loop
  * Initialises variables, prompts for input, parses and output data & results
+ * @param {*} trip data from trips.txt, null on first instance
+ * @param {*} calendar data from calendars.txt
+ * @param {*} stopTime data from stop_times.txt
  */
-async function busTracker() {
-    let trip;
-    let calendar;
-    let stopTime;
+async function busTracker(trip, calendar, stopTime) {
     let tripUpdateData;
     let vehiclePositionData;
 
-    while (true) {
     const dateString = askDate();
     const time = askTime();
     const routeName = askRouteName();
@@ -404,9 +403,9 @@ async function busTracker() {
     const filteredTrips = filterUsingCalendar(joinedRouteTrip, calendar, dateString.split("-").join(""), days[date.getDay()]);
     const joinedTime = joinTime(filteredTrips, stopTime, time, add10Mins(date));
 
-    // live data 
+    // getting live data 
     if (existsSync(tripUpdatesFile) && existsSync(vehiclePositionsFile)) {
-        // if file exists
+        // if cached file exists
         const tripUpdate = await readCache(tripUpdatesFile);
         const vehiclePosition = await readCache(vehiclePositionsFile);
         
@@ -429,11 +428,10 @@ async function busTracker() {
     
     console.table(finalTrips.sort(sortByTime));
     if (askToSearchAgain()) {
-        continue;
+        await busTracker(trip, calendar, stopTime)
     } else {
         return;
     };
-    }
 }
 
 /**
@@ -441,8 +439,12 @@ async function busTracker() {
  * Calls the main loop of the app
  */
 async function main() {
+    const trip = null;
+    const calendar = null;
+    const stopTime = null;
+    
     console.log(welcomeMessage);
-    await busTracker();
+    await busTracker(trip, calendar, stopTime);
     console.log(thanksMessage);
 }
 main();
